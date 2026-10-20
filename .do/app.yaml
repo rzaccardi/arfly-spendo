@@ -1,0 +1,91 @@
+# DigitalOcean App Platform — Spendo Banking Hub
+# Single Docker service: Fastify API + in-process cron + admin SPA from web/dist
+#
+# Create / update:
+#   doctl apps create --spec .do/app.yaml
+#   doctl apps update <APP_ID> --spec .do/app.yaml
+#
+# Set SECRET values in the Control Panel or:
+#   doctl apps update <APP_ID> --spec .do/app.yaml  (after filling type: SECRET via UI)
+#
+# Replace github.repo / branch if your fork differs. HTTPS is terminated by App Platform.
+
+name: spendo
+region: fra
+
+services:
+  - name: api
+    dockerfile_path: Dockerfile
+    source_dir: /
+    github:
+      repo: rzaccardi/arfly-spendo
+      branch: main
+      deploy_on_push: true
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 20
+      period_seconds: 10
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 3
+    routes:
+      - path: /
+    envs:
+      - key: NODE_ENV
+        scope: RUN_AND_BUILD_TIME
+        value: "production"
+      - key: HOST
+        scope: RUN_TIME
+        value: "0.0.0.0"
+      # App Platform also injects PORT; keep aligned with http_port
+      - key: PORT
+        scope: RUN_TIME
+        value: "8080"
+      - key: LOG_LEVEL
+        scope: RUN_TIME
+        value: "info"
+      - key: SYNC_CRON
+        scope: RUN_TIME
+        value: "*/15 * * * *"
+      - key: WEBHOOK_DELIVERY_CRON
+        scope: RUN_TIME
+        value: "* * * * *"
+      - key: FINTABLE_BASE_URL
+        scope: RUN_TIME
+        value: "https://fintable.io/api/v2"
+      - key: FINTABLE_DRY_RUN
+        scope: RUN_TIME
+        value: "false"
+      # Bound managed Postgres (component name below)
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        value: ${spendo-db.DATABASE_URL}
+      # Secrets — set values in DO UI / doctl; never commit real values
+      - key: ENCRYPTION_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: FINTABLE_API_TOKEN
+        scope: RUN_TIME
+        type: SECRET
+      - key: ADMIN_PASSWORD
+        scope: RUN_TIME
+        type: SECRET
+      - key: ADMIN_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+
+# Managed Postgres attached to this app.
+# Alternative: remove this block and set DATABASE_URL (SECRET) to an existing
+# DigitalOcean Managed Database connection string (prefer private network URL).
+databases:
+  - name: spendo-db
+    engine: PG
+    version: "16"
+    production: true
+    # For an existing cluster instead of a new DB component:
+    # cluster_name: your-existing-pg-cluster
+    # db_name: spendo
+    # db_user: spendo

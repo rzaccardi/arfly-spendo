@@ -1,0 +1,35 @@
+# Git / IDE
+.git
+.gitignore
+.cursor
+.vscode
+.idea
+*.md
+!README.md
+
+# Dependencies & build outputs (rebuilt in image)
+node_modules
+web/node_modules
+dist
+web/dist
+coverage
+.drizzle
+*.tsbuildinfo
+*.log
+.DS_Store
+
+# Secrets & local env — never bake into images
+.env
+.env.*
+!.env.example
+config/workspaces.json
+
+# Tests / local tooling
+tests
+vitest.config.ts
+docker-compose.yml
+docs
+
+# Optional local artifacts
+*.pem
+*.key

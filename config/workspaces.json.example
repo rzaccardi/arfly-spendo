@@ -1,0 +1,22 @@
+{
+  "_comment": "Copy to config/workspaces.json before first seed. Live History installs should keep a History-only file (one tenant + one app). Do not recreate Azienda 1–4 placeholders against a History production DB.",
+  "tenants": [
+    {
+      "name": "History",
+      "legal_name": "History S.r.l.",
+      "workspace_id": "ws_REPLACE_ME_HISTORY"
+    }
+  ],
+  "applications": [
+    {
+      "name": "History SaaS",
+      "tenant_names": ["History"],
+      "permissions": [
+        "accounts:read",
+        "balances:read",
+        "transactions:read",
+        "sync:request"
+      ]
+    }
+  ]
+}

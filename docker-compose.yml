@@ -1,0 +1,28 @@
+name: spendo
+
+# Default stack: Postgres only.
+# Run API + webhook/sync workers on the host: `npm run dev` or `npm run build && npm start`
+# Run Admin UI: `npm run web` (dev) or serve `web/dist` after `npm run web:build`
+# Optional future services (api/web images) can be added here without changing the data volume.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: spendo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: spendo
+      POSTGRES_PASSWORD: spendo
+      POSTGRES_DB: spendo
+    ports:
+      - '5432:5432'
+    volumes:
+      - spendo_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U spendo -d spendo']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  spendo_pgdata:
