@@ -99,9 +99,26 @@ e sul service:
 
 1. Rimuovi (o commenta) il blocco `databases` nello spec, oppure usa `cluster_name` / `db_name` / `db_user` come nelle note dello YAML.
 2. Imposta `DATABASE_URL` come **SECRET** con la connection string (preferisci URL **private** se l’app e il DB sono nella stessa VPC/region).
-3. Assicurati che il firewall del DB permetta il traffico da App Platform.
+3. Aggiungi `?sslmode=require` (o `&sslmode=require`) alla connection string se manca — obbligatorio per Managed Postgres DO. Il client lo aggiunge automaticamente per host non-locali.
+4. Assicurati che il firewall del DB permetta il traffico da App Platform.
 
-Le migration partono automaticamente a ogni deploy (`CMD` del Dockerfile). Sono idempotenti (Drizzle).
+Le migration partono automaticamente a ogni deploy (`CMD` del Dockerfile). Sono idempotenti (Drizzle). Il journal delle migration vive in `public.__drizzle_migrations` (non nello schema `drizzle`), così l’utente app non deve avere `CREATE` sul database.
+
+### Privilegi utente app (se migrate fallisce ancora)
+
+Se usi un utente dedicato (non `doadmin`) e vedi errori di permission su `public` / tabelle, connettiti come **doadmin** (console DO → Databases → Users & Databases / Connection details) ed esegui, adattando nomi DB e utente:
+
+```sql
+-- Esempio DO: database spesso "defaultdb" o "db-arfly-spendo"; utente app es. "spendo" / "appuser"
+GRANT CONNECT ON DATABASE "defaultdb" TO appuser;
+GRANT USAGE, CREATE ON SCHEMA public TO appuser;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO appuser;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO appuser;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO appuser;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO appuser;
+```
+
+Sostituisci `"defaultdb"` / `appuser` con il database e l’utente della tua `DATABASE_URL`. Non serve più `CREATE SCHEMA drizzle`.
 
 ---
 
@@ -112,7 +129,7 @@ Le migration partono automaticamente a ogni deploy (`CMD` del Dockerfile). Sono 
 | `NODE_ENV` | production | Abilita SPA static + cookie `Secure` |
 | `HOST` | `0.0.0.0` | Bind in container |
 | `PORT` | `8080` | Allineato a `http_port` (DO può anche iniettare `PORT`) |
-| `DATABASE_URL` | bind o secret | Postgres |
+| `DATABASE_URL` | bind o secret | Postgres; Managed DO: includi `sslmode=require` (o lascia che il client lo aggiunga) |
 | `ENCRYPTION_KEY` | **secret** | AES-256-GCM (PAT + webhook secrets) |
 | `FINTABLE_API_TOKEN` | **secret** | Opzionale ma necessario per sync live |
 | `ADMIN_PASSWORD` | **secret** | Login cookie Admin UI |
@@ -187,9 +204,13 @@ curl -sS https://<tuo-app>.ondigitalocean.app/health
 
 ## Troubleshooting
 
+Il `CMD` del container è `migrate && start`: se migrate fallisce il processo esce e l’health check (`/health`) fallisce (crash loop). I log mostrano `[migrate] failed — …` prima dell’exit.
+
 | Sintomo | Cosa controllare |
 | --- | --- |
-| Crash loop all’avvio | Log migrate: `DATABASE_URL`, rete verso Postgres |
+| Crash loop all’avvio | Log migrate: `DATABASE_URL`, rete verso Postgres, SSL |
+| `permission denied for database` / `CREATE SCHEMA "drizzle"` | Fix in codice: journal in `public`. Se resta 42501 su tabelle/schema, applica i GRANT sopra come doadmin |
+| SSL / `no pg_hba.conf` / certificate | `sslmode=require` in `DATABASE_URL`; firewall Trusted Sources → App Platform |
 | `Invalid configuration` | `ENCRYPTION_KEY` mancante o troppo corto |
 | Admin login fallisce | `ADMIN_PASSWORD`, `NODE_ENV=production`, cookie su HTTPS |
 | Sync non chiama Fintable | `FINTABLE_API_TOKEN` e `FINTABLE_DRY_RUN=false`; connessioni attive in DB |

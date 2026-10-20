@@ -11,7 +11,13 @@ async function main(): Promise<void> {
   if (!url) throw new Error('DATABASE_URL is required');
   const { db, sql } = createDb(url);
   try {
-    await migrate(db, { migrationsFolder: path.join(__dirname, 'migrations') });
+    // Use public so app DB users on managed Postgres (DO) do not need CREATE SCHEMA.
+    // Default drizzle schema requires CREATE on the database (error 42501).
+    await migrate(db, {
+      migrationsFolder: path.join(__dirname, 'migrations'),
+      migrationsSchema: 'public',
+      migrationsTable: '__drizzle_migrations',
+    });
     console.log('Migrations applied successfully.');
   } finally {
     await sql.end({ timeout: 5 });
@@ -19,6 +25,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error(err);
+  console.error('[migrate] failed — API will not start until this succeeds:', err);
   process.exit(1);
 });
