@@ -589,8 +589,8 @@ History può ricevere eventi se arfly configura l’URL HTTPS.
 
 | Superficie | Motivo |
 | --- | --- |
-| `/admin/api/*` | Solo operatori arfly (password / `ADMIN_API_KEY`) |
-| Admin UI (`:5173`) | Console interna |
+| `/admin/api/*` | Solo operatori arfly (password + eventuale TOTP / `ADMIN_API_KEY`) |
+| Admin UI (`:5173`) | Console interna (MFA in Sicurezza) |
 | API Fintable direttamente | PAT restano cifrati in Spendo |
 | Endpoint non elencati qui | Non fanno parte del contratto SaaS |
 

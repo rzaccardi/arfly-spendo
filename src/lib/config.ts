@@ -27,6 +27,17 @@ const envSchema = z.object({
   ADMIN_API_KEY: z.string().optional().default(''),
   ADMIN_TOKEN: z.string().optional().default(''),
   ADMIN_SESSION_TTL_HOURS: z.coerce.number().int().positive().default(12),
+  /** Max failed admin password attempts per IP within the window before lockout */
+  ADMIN_LOGIN_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  /** Sliding window for counting failed logins (ms) */
+  ADMIN_LOGIN_WINDOW_MS: z.coerce.number().int().positive().default(15 * 60_000),
+  /** Lockout duration after max attempts (ms) */
+  ADMIN_LOGIN_LOCKOUT_MS: z.coerce.number().int().positive().default(15 * 60_000),
+  /** Fastify route rate limit for POST /admin/api/login */
+  ADMIN_LOGIN_RATE_MAX: z.coerce.number().int().positive().default(20),
+  ADMIN_LOGIN_RATE_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
+  /** MFA challenge token TTL after password step */
+  ADMIN_MFA_CHALLENGE_TTL_SECONDS: z.coerce.number().int().positive().default(300),
 });
 
 export type AppConfig = z.infer<typeof envSchema> & {

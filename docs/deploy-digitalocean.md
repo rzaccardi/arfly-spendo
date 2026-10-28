@@ -133,7 +133,8 @@ Sostituisci `"defaultdb"` / `appuser` con il database e l’utente della tua `DA
 | `ENCRYPTION_KEY` | **secret** | AES-256-GCM (PAT + webhook secrets) |
 | `FINTABLE_API_TOKEN` | **secret** | Opzionale ma necessario per sync live |
 | `ADMIN_PASSWORD` | **secret** | Login cookie Admin UI |
-| `ADMIN_API_KEY` | **secret** | Opzionale Bearer admin |
+| `ADMIN_API_KEY` | **secret** | Opzionale Bearer admin (bypass MFA) |
+| `ADMIN_LOGIN_*` / `ADMIN_MFA_CHALLENGE_TTL_SECONDS` | opzionale | Anti brute-force + TTL challenge MFA (default in `.env.example`) |
 | `SYNC_CRON` | default `*/15 * * * *` | Sync Fintable |
 | `WEBHOOK_DELIVERY_CRON` | default `* * * * *` | Delivery outbound |
 | `FINTABLE_BASE_URL` | default API v2 | |
@@ -161,8 +162,10 @@ Esempio (console one-off / macchina con accesso al DB e allo stesso `ENCRYPTION_
 
 ```bash
 # In locale, puntando al DATABASE_URL di produzione (tunnel/VPN/private):
-export DATABASE_URL='postgresql://…'
-export ENCRYPTION_KEY='…'   # stesso della prod
+export DATABASE_URL='postgresql://…?sslmode=require'
+export ENCRYPTION_KEY='…'   # MUST match DO App Platform ENCRYPTION_KEY
+# ⚠ seed / worker / migrate / bootstrap / dev mutano dati di PRODUZIONE
+# Preferisci API locale (PORT=3000) + Vite proxy → localhost (cookie admin).
 # History-only — non seedare placeholder Azienda 1–4 in produzione
 cp config/workspaces.json.example config/workspaces.json
 # modifica workspace_id / nomi History, poi:

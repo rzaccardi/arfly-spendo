@@ -2,17 +2,25 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public code?: string,
+    public details?: Record<string, unknown>,
   ) {
     super(message);
   }
 }
 
-async function parseError(res: Response): Promise<string> {
+async function parseErrorBody(
+  res: Response,
+): Promise<{ message: string; code?: string; details?: Record<string, unknown> }> {
   try {
     const body = await res.json();
-    return body?.error?.message ?? res.statusText;
+    return {
+      message: body?.error?.message ?? res.statusText,
+      code: body?.error?.code,
+      details: body?.error?.details,
+    };
   } catch {
-    return res.statusText;
+    return { message: res.statusText };
   }
 }
 
@@ -31,7 +39,8 @@ export async function api<T>(
     body: options.json !== undefined ? JSON.stringify(options.json) : options.body,
   });
   if (!res.ok) {
-    throw new ApiError(res.status, await parseError(res));
+    const err = await parseErrorBody(res);
+    throw new ApiError(res.status, err.message, err.code, err.details);
   }
   const ct = res.headers.get('content-type') ?? '';
   if (ct.includes('text/csv')) {

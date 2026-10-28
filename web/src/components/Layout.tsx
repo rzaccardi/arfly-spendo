@@ -11,6 +11,7 @@ const links = [
   { to: '/webhooks', label: 'Webhook' },
   { to: '/audit', label: 'Audit log' },
   { to: '/data', label: 'Conti & movimenti' },
+  { to: '/security', label: 'Sicurezza' },
 ];
 
 export function Layout() {

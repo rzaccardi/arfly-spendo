@@ -314,9 +314,20 @@ export const webhookDeliveries = pgTable(
   ],
 );
 
+/** Singleton row for Admin UI TOTP MFA (shared ADMIN_PASSWORD operators) */
+export const adminMfaSettings = pgTable('admin_mfa_settings', {
+  id: text('id').primaryKey().default('default'),
+  enabled: boolean('enabled').notNull().default(false),
+  encryptedTotpSecret: text('encrypted_totp_secret'),
+  pendingEncryptedSecret: text('pending_encrypted_secret'),
+  recoveryCodeHashes: jsonb('recovery_code_hashes').$type<string[]>().notNull().default([]),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export type Tenant = typeof tenants.$inferSelect;
 export type Application = typeof applications.$inferSelect;
 export type BankAccount = typeof bankAccounts.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
 export type ProviderConnection = typeof providerConnections.$inferSelect;
 export type WebhookSubscription = typeof webhookSubscriptions.$inferSelect;
+export type AdminMfaSettings = typeof adminMfaSettings.$inferSelect;

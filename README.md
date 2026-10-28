@@ -69,6 +69,14 @@ npm run build && npm run web:build
 NODE_ENV=production npm start # API + cron workers + Admin SPA from web/dist (same origin)
 ```
 
+### Local tooling against DigitalOcean prod
+
+Live: https://spendo.onarfly.com. If `.env` uses the managed `DATABASE_URL` (`sslmode=require`):
+
+- Run API locally (`npm run dev`) against that DB; keep Vite proxy → `http://localhost:3000` so admin cookies work.
+- `ENCRYPTION_KEY` and `ADMIN_PASSWORD` must match App Platform secrets (copy from DO UI if decrypt/login fails).
+- **⚠ `npm run seed` / `worker` / `migrate` / `bootstrap` / `dev` mutate production data.**
+
 Optional Compose notes: only `postgres` is defined by default. For DigitalOcean App Platform, use the `Dockerfile` / `.do/app.yaml` — [docs/deploy-digitalocean.md](docs/deploy-digitalocean.md). Do not commit real PATs or `spk_` keys.
 
 ## Admin UI (operator console)
@@ -77,6 +85,9 @@ Credentials are separate from SaaS `spk_` keys:
 
 - `ADMIN_PASSWORD` — cookie session (`spendo_admin_session`)
 - and/or `ADMIN_API_KEY` / `ADMIN_TOKEN` — Bearer on `/admin/api/*`
+- Optional **TOTP MFA** (authenticator app) via Admin UI → Sicurezza; recovery codes monouso
+- Login protected by per-IP rate limit + progressive lockout (`ADMIN_LOGIN_*` in `.env.example`)
+- `ADMIN_API_KEY` bypasses TOTP (automation); password login requires MFA when enabled
 
 | Page | Purpose |
 | --- | --- |
@@ -89,6 +100,7 @@ Credentials are separate from SaaS `spk_` keys:
 | Webhook | Subscriptions + deliveries + queue flush |
 | Audit log | Paginated filters (no secrets) |
 | Conti & movimenti | Browse + CSV export |
+| Sicurezza | TOTP MFA enrollment / disable / recovery codes |
 
 ## History example
 

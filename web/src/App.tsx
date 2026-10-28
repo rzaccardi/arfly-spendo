@@ -11,6 +11,7 @@ import { AuditLogsPage } from './pages/AuditLogs';
 import { DataBrowsePage } from './pages/DataBrowse';
 import { WebhooksPage } from './pages/Webhooks';
 import { CashflowPage } from './pages/Cashflow';
+import { SecurityPage } from './pages/Security';
 
 function Protected({ children }: { children: React.ReactNode }) {
   const { loading, authenticated } = useAuth();
@@ -61,6 +62,7 @@ export function App() {
         <Route path="data" element={<DataBrowsePage />} />
         <Route path="webhooks" element={<WebhooksPage />} />
         <Route path="cashflow" element={<CashflowPage />} />
+        <Route path="security" element={<SecurityPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -30,6 +30,9 @@ export function conflict(message: string): AppError {
   return new AppError(409, 'conflict', message);
 }
 
-export function tooManyRequests(message = 'Rate limit exceeded'): AppError {
-  return new AppError(429, 'rate_limited', message);
+export function tooManyRequests(
+  message = 'Rate limit exceeded',
+  details?: Record<string, unknown>,
+): AppError {
+  return new AppError(429, 'rate_limited', message, details);
 }
