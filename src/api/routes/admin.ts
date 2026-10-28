@@ -6,10 +6,20 @@ import {
   adminSessionCookie,
   clearAdminSessionCookie,
   createAdminSessionToken,
+  createMfaChallengeToken,
   isAdminAuthenticated,
   verifyAdminApiKey,
   verifyAdminPassword,
+  verifyMfaChallengeToken,
 } from '../../auth/admin.js';
+import {
+  assertAdminLoginAllowed,
+  clearAdminLoginFailures,
+  loginFailureDelayMs,
+  recordAdminLoginFailure,
+  sleep,
+  throwInvalidCredentials,
+} from '../../auth/login-guard.js';
 import { unauthorized } from '../../lib/errors.js';
 import { ALL_PERMISSIONS } from '../../auth/permissions.js';
 import {
@@ -33,6 +43,15 @@ import {
   adminUpsertConnection,
   transactionsToCsv,
 } from '../../domain/admin.js';
+import {
+  confirmAdminMfaSetup,
+  disableAdminMfa,
+  getAdminMfaStatus,
+  isAdminMfaEnabled,
+  regenerateAdminRecoveryCodes,
+  startAdminMfaSetup,
+  verifyAdminMfaFactor,
+} from '../../domain/admin-mfa.js';
 import {
   attemptWebhookDelivery,
   createWebhookSubscription,
@@ -66,37 +85,123 @@ export async function adminRoutes(
     auth_configured: config.hasAdminAuth,
   }));
 
-  app.post('/admin/api/login', async (request, reply) => {
-    if (!config.hasAdminAuth) {
-      throw unauthorized('Admin auth not configured (set ADMIN_PASSWORD or ADMIN_API_KEY)');
-    }
-    const body = z
-      .object({
-        password: z.string().min(1).optional(),
-        api_key: z.string().min(1).optional(),
-      })
-      .parse(request.body ?? {});
+  app.post(
+    '/admin/api/login',
+    {
+      config: {
+        rateLimit: {
+          max: config.ADMIN_LOGIN_RATE_MAX,
+          timeWindow: config.ADMIN_LOGIN_RATE_WINDOW_MS,
+        },
+      },
+    },
+    async (request, reply) => {
+      if (!config.hasAdminAuth) {
+        throw unauthorized('Admin auth not configured (set ADMIN_PASSWORD or ADMIN_API_KEY)');
+      }
+      const body = z
+        .object({
+          password: z.string().min(1).optional(),
+          api_key: z.string().min(1).optional(),
+          mfa_token: z.string().min(1).optional(),
+          totp_code: z.string().min(1).optional(),
+          recovery_code: z.string().min(1).optional(),
+        })
+        .parse(request.body ?? {});
 
-    const passwordOk = body.password ? verifyAdminPassword(config, body.password) : false;
-    const keyOk = body.api_key ? verifyAdminApiKey(config, body.api_key) : false;
+      const ip = request.ip;
+      assertAdminLoginAllowed(config, ip);
 
-    if (!passwordOk && !keyOk) {
-      await writeAuditLog(db, {
-        action: 'admin.login.failed',
-        resource: 'admin',
-      });
-      throw unauthorized('Invalid admin credentials');
-    }
+      const issueSession = async (meta?: Record<string, unknown>) => {
+        clearAdminLoginFailures(ip);
+        const token = createAdminSessionToken(config);
+        const maxAge = config.ADMIN_SESSION_TTL_HOURS * 3600;
+        reply.header('set-cookie', adminSessionCookie(token, maxAge, secure));
+        await writeAuditLog(db, {
+          action: 'admin.login',
+          resource: 'admin',
+          metadata: meta,
+        });
+        return {
+          data: {
+            authenticated: true,
+            mfa_required: false,
+            expires_in_hours: config.ADMIN_SESSION_TTL_HOURS,
+          },
+        };
+      };
 
-    const token = createAdminSessionToken(config);
-    const maxAge = config.ADMIN_SESSION_TTL_HOURS * 3600;
-    reply.header('set-cookie', adminSessionCookie(token, maxAge, secure));
-    await writeAuditLog(db, {
-      action: 'admin.login',
-      resource: 'admin',
-    });
-    return { data: { authenticated: true, expires_in_hours: config.ADMIN_SESSION_TTL_HOURS } };
-  });
+      const failLogin = async (): Promise<never> => {
+        const result = recordAdminLoginFailure(config, ip);
+        await sleep(loginFailureDelayMs(result.failures || config.ADMIN_LOGIN_MAX_ATTEMPTS));
+        await writeAuditLog(db, {
+          action: 'admin.login.failed',
+          resource: 'admin',
+          metadata: { locked: result.locked },
+        });
+        throwInvalidCredentials({
+          locked: result.locked,
+          retryAfterSeconds: result.retryAfterSeconds,
+        });
+      };
+
+      // Step 2: MFA challenge completion (password already verified)
+      if (body.mfa_token) {
+        if (!verifyMfaChallengeToken(config, body.mfa_token)) {
+          await failLogin();
+        }
+        const mfaOk = await verifyAdminMfaFactor(db, config, {
+          totpCode: body.totp_code,
+          recoveryCode: body.recovery_code,
+        });
+        if (!mfaOk) {
+          await failLogin();
+        }
+        return issueSession({ mfa: true });
+      }
+
+      const passwordOk = body.password ? verifyAdminPassword(config, body.password) : false;
+      const keyOk = body.api_key ? verifyAdminApiKey(config, body.api_key) : false;
+
+      if (!passwordOk && !keyOk) {
+        await failLogin();
+      }
+
+      // Bearer ADMIN_API_KEY bypasses TOTP (machine / automation)
+      if (keyOk && !passwordOk) {
+        return issueSession({ mode: 'api_key' });
+      }
+
+      const mfaEnabled = await isAdminMfaEnabled(db);
+      if (mfaEnabled) {
+        if (body.totp_code || body.recovery_code) {
+          const mfaOk = await verifyAdminMfaFactor(db, config, {
+            totpCode: body.totp_code,
+            recoveryCode: body.recovery_code,
+          });
+          if (!mfaOk) {
+            await failLogin();
+          }
+          return issueSession({ mfa: true });
+        }
+        const mfaToken = createMfaChallengeToken(config);
+        await writeAuditLog(db, {
+          action: 'admin.login.mfa_required',
+          resource: 'admin',
+        });
+        return {
+          data: {
+            authenticated: false,
+            mfa_required: true,
+            mfa_token: mfaToken,
+            expires_in_seconds: config.ADMIN_MFA_CHALLENGE_TTL_SECONDS,
+          },
+        };
+      }
+
+      return issueSession({ mode: 'password' });
+    },
+  );
 
   app.post('/admin/api/logout', async (_request, reply) => {
     reply.header('set-cookie', clearAdminSessionCookie(secure));
@@ -105,6 +210,7 @@ export async function adminRoutes(
 
   app.get('/admin/api/me', async (request) => {
     requireAdmin(config, request);
+    const mfa = await getAdminMfaStatus(db);
     return {
       data: {
         authenticated: true,
@@ -112,8 +218,60 @@ export async function adminRoutes(
           password: Boolean(config.ADMIN_PASSWORD),
           api_key: Boolean(config.adminApiKey),
         },
+        mfa,
       },
     };
+  });
+
+  app.get('/admin/api/mfa', async (request) => {
+    requireAdmin(config, request);
+    return { data: await getAdminMfaStatus(db) };
+  });
+
+  app.post('/admin/api/mfa/setup', async (request) => {
+    requireAdmin(config, request);
+    const data = await startAdminMfaSetup(db, config);
+    await writeAuditLog(db, { action: 'admin.mfa.setup_started', resource: 'admin' });
+    return { data };
+  });
+
+  app.post('/admin/api/mfa/confirm', async (request) => {
+    requireAdmin(config, request);
+    const body = z.object({ totp_code: z.string().min(6).max(8) }).parse(request.body ?? {});
+    const data = await confirmAdminMfaSetup(db, config, body.totp_code);
+    await writeAuditLog(db, { action: 'admin.mfa.enabled', resource: 'admin' });
+    return { data };
+  });
+
+  app.post('/admin/api/mfa/disable', async (request) => {
+    requireAdmin(config, request);
+    const body = z
+      .object({
+        password: z.string().min(1),
+        totp_code: z.string().min(1).optional(),
+        recovery_code: z.string().min(1).optional(),
+      })
+      .refine((b) => Boolean(b.totp_code || b.recovery_code), {
+        message: 'totp_code or recovery_code required',
+      })
+      .parse(request.body ?? {});
+    if (!verifyAdminPassword(config, body.password)) {
+      throw unauthorized('Invalid admin credentials');
+    }
+    await disableAdminMfa(db, config, {
+      totpCode: body.totp_code,
+      recoveryCode: body.recovery_code,
+    });
+    await writeAuditLog(db, { action: 'admin.mfa.disabled', resource: 'admin' });
+    return { data: { enabled: false } };
+  });
+
+  app.post('/admin/api/mfa/recovery-codes', async (request) => {
+    requireAdmin(config, request);
+    const body = z.object({ totp_code: z.string().min(6).max(8) }).parse(request.body ?? {});
+    const data = await regenerateAdminRecoveryCodes(db, config, body.totp_code);
+    await writeAuditLog(db, { action: 'admin.mfa.recovery_regenerated', resource: 'admin' });
+    return { data };
   });
 
   // --- Overview ---

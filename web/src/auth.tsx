@@ -8,10 +8,24 @@ import {
 } from 'react';
 import { api, ApiError } from './api';
 
+export type LoginResult =
+  | { authenticated: true; mfa_required: false }
+  | {
+      authenticated: false;
+      mfa_required: true;
+      mfa_token: string;
+      expires_in_seconds: number;
+    };
+
 type AuthState = {
   loading: boolean;
   authenticated: boolean;
-  login: (password: string) => Promise<void>;
+  login: (opts: {
+    password?: string;
+    mfa_token?: string;
+    totp_code?: string;
+    recovery_code?: string;
+  }) => Promise<LoginResult>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
 };
@@ -41,10 +55,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, [refresh]);
 
-  const login = useCallback(async (password: string) => {
-    await api('/admin/api/login', { method: 'POST', json: { password } });
-    setAuthenticated(true);
-  }, []);
+  const login = useCallback(
+    async (opts: {
+      password?: string;
+      mfa_token?: string;
+      totp_code?: string;
+      recovery_code?: string;
+    }): Promise<LoginResult> => {
+      const res = await api<{ data: LoginResult }>('/admin/api/login', {
+        method: 'POST',
+        json: opts,
+      });
+      if (res.data.mfa_required) {
+        return res.data;
+      }
+      setAuthenticated(true);
+      return res.data;
+    },
+    [],
+  );
 
   const logout = useCallback(async () => {
     await api('/admin/api/logout', { method: 'POST' });

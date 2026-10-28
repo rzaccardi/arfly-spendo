@@ -43,7 +43,38 @@ export function verifyAdminSessionToken(config: AppConfig, token: string): boole
   try {
     const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
       exp?: number;
+      purpose?: string;
     };
+    if (data.purpose) return false;
+    if (!data.exp || Date.now() > data.exp) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Short-lived token after password OK when MFA is required (default 5 minutes). */
+export function createMfaChallengeToken(config: AppConfig): string {
+  const exp = Date.now() + config.ADMIN_MFA_CHALLENGE_TTL_SECONDS * 1000;
+  const payload = Buffer.from(
+    JSON.stringify({ exp, purpose: 'mfa', v: 1 }),
+    'utf8',
+  ).toString('base64url');
+  const sig = createHmac('sha256', sessionSecret(config)).update(payload).digest('base64url');
+  return `${payload}.${sig}`;
+}
+
+export function verifyMfaChallengeToken(config: AppConfig, token: string): boolean {
+  const [payload, sig] = token.split('.');
+  if (!payload || !sig) return false;
+  const expected = createHmac('sha256', sessionSecret(config)).update(payload).digest('base64url');
+  if (!safeEqual(sig, expected)) return false;
+  try {
+    const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
+      exp?: number;
+      purpose?: string;
+    };
+    if (data.purpose !== 'mfa') return false;
     if (!data.exp || Date.now() > data.exp) return false;
     return true;
   } catch {
