@@ -38,7 +38,9 @@ import {
   adminRevokeCredentials,
   adminRotateApiKey,
   adminSetAppPermissions,
+  adminListFintableWorkspaces,
   adminTriggerConnectionSync,
+  adminUpdateConnection,
   adminUpdateTenant,
   adminUpsertConnection,
   transactionsToCsv,
@@ -381,6 +383,26 @@ export async function adminRoutes(
       })
       .parse(request.body ?? {});
     return { data: await adminUpsertConnection(db, body) };
+  });
+
+  app.get('/admin/api/fintable/workspaces', async (request) => {
+    requireAdmin(config, request);
+    return { data: await adminListFintableWorkspaces() };
+  });
+
+  app.patch('/admin/api/connections/:id', async (request) => {
+    requireAdmin(config, request);
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = z
+      .object({
+        tenant_id: z.string().uuid().optional(),
+        workspace_id: z.string().min(1).optional(),
+        token: z.string().optional(),
+        use_env_token: z.boolean().optional(),
+        status: z.enum(['active', 'inactive']).optional(),
+      })
+      .parse(request.body ?? {});
+    return { data: await adminUpdateConnection(db, id, body) };
   });
 
   app.post('/admin/api/connections/:id/sync', async (request) => {

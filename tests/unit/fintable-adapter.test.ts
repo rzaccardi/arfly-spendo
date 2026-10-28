@@ -74,4 +74,40 @@ describe('Fintable adapter', () => {
     expect(pending.items).toHaveLength(1);
     expect(pending.supported).toBe(true);
   });
+
+  it('lists workspaces without sending workspace_id', async () => {
+    const calls: string[] = [];
+    const client = new FintableClient({
+      baseUrl: 'https://fintable.io/api/v2',
+      token: 'pat_test',
+      workspaceId: 'ws_should_not_be_sent',
+      dryRun: false,
+      fetchImpl: async (input) => {
+        const url = String(input);
+        calls.push(url);
+        return new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: 'ws_history',
+                name: 'History',
+                role: 'owner',
+                is_default: true,
+              },
+              { id: '', name: 'skip' },
+            ],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      },
+    });
+
+    const workspaces = await client.listWorkspaces();
+    expect(workspaces).toEqual([
+      { id: 'ws_history', name: 'History', role: 'owner', is_default: true },
+    ]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toBe('https://fintable.io/api/v2/workspaces');
+    expect(calls[0]).not.toContain('workspace_id');
+  });
 });

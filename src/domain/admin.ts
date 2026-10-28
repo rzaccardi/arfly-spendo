@@ -15,7 +15,8 @@ import { generateApiKey, hashApiKey } from '../auth/api-keys.js';
 import { ALL_PERMISSIONS, isPermission } from '../auth/permissions.js';
 import { encryptSecret } from '../lib/crypto.js';
 import { getConfig } from '../lib/config.js';
-import { badRequest, notFound } from '../lib/errors.js';
+import { badRequest, conflict, notFound } from '../lib/errors.js';
+import { FintableClient, FintableHttpError } from '../providers/fintable/client.js';
 import { writeAuditLog } from '../lib/audit.js';
 import { clampLimit, decodeCursor, encodeCursor, paginationResponse } from '../lib/pagination.js';
 import { listTransactions, type TransactionFilters } from './transactions.js';
@@ -425,6 +426,120 @@ export async function adminUpsertConnection(
     workspace_id: row!.workspaceId,
     status: row!.status,
   };
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = err;
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    if ('code' in current && (current as { code?: string }).code === '23505') return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+export async function adminUpdateConnection(
+  db: Db,
+  connectionId: string,
+  input: {
+    tenant_id?: string;
+    workspace_id?: string;
+    token?: string;
+    use_env_token?: boolean;
+    status?: string;
+  },
+) {
+  const config = getConfig();
+  const existing = await db.query.providerConnections.findFirst({
+    where: eq(providerConnections.id, connectionId),
+  });
+  if (!existing) throw notFound('Connection not found');
+
+  const tenantId = input.tenant_id ?? existing.tenantId;
+  if (input.tenant_id) {
+    const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, input.tenant_id) });
+    if (!tenant) throw notFound('Tenant not found');
+  }
+
+  const workspaceId = input.workspace_id?.trim() || existing.workspaceId;
+  const status = input.status ?? existing.status;
+  if (status !== 'active' && status !== 'inactive') {
+    throw badRequest('Status must be active or inactive');
+  }
+
+  let encryptedCredentials = existing.encryptedCredentials;
+  const token = input.token?.trim() ?? '';
+  if (token) {
+    encryptedCredentials = encryptSecret(token, config.ENCRYPTION_KEY);
+  } else if (input.use_env_token) {
+    if (!config.FINTABLE_API_TOKEN) {
+      throw badRequest('FINTABLE_API_TOKEN is not set');
+    }
+    encryptedCredentials = encryptSecret(config.FINTABLE_API_TOKEN, config.ENCRYPTION_KEY);
+  }
+
+  const workspaceChanged = workspaceId !== existing.workspaceId;
+
+  let row: typeof existing | undefined;
+  try {
+    const updated = await db
+      .update(providerConnections)
+      .set({
+        tenantId,
+        workspaceId,
+        status,
+        encryptedCredentials,
+        updatedAt: new Date(),
+        lastError: null,
+        ...(workspaceChanged ? { syncCursorUpdatedSince: null } : {}),
+      })
+      .where(eq(providerConnections.id, connectionId))
+      .returning();
+    row = updated[0];
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      throw conflict('A connection for this Fintable workspace already exists');
+    }
+    throw err;
+  }
+
+  await writeAuditLog(db, {
+    tenantId,
+    action: 'admin.connection.update',
+    resource: 'provider_connection',
+    resourceId: connectionId,
+    metadata: { workspace_id: workspaceId },
+  });
+
+  return {
+    id: row!.id,
+    tenant_id: row!.tenantId,
+    provider: row!.provider,
+    workspace_id: row!.workspaceId,
+    status: row!.status,
+  };
+}
+
+export async function adminListFintableWorkspaces() {
+  const config = getConfig();
+  if (!config.FINTABLE_API_TOKEN) {
+    throw badRequest('FINTABLE_API_TOKEN is not set');
+  }
+  const client = new FintableClient({
+    baseUrl: config.FINTABLE_BASE_URL,
+    token: config.FINTABLE_API_TOKEN,
+    workspaceId: 'unused',
+    dryRun: false,
+  });
+  try {
+    return await client.listWorkspaces();
+  } catch (err) {
+    if (err instanceof FintableHttpError) {
+      throw badRequest(err.message);
+    }
+    throw err;
+  }
 }
 
 export async function adminDeactivateConnection(db: Db, connectionId: string) {

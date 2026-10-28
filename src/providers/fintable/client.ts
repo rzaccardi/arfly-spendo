@@ -22,6 +22,13 @@ export type FintableClientOptions = {
 
 type Query = Record<string, string | number | boolean | string[] | undefined | null>;
 
+export type FintableWorkspace = {
+  id: string;
+  name: string;
+  role: string;
+  is_default: boolean;
+};
+
 export class FintableClient {
   private readonly baseUrl: string;
   private readonly token: string;
@@ -55,18 +62,51 @@ export class FintableClient {
     return this.request<T>('POST', path, query, body);
   }
 
+  /**
+   * Workspaces this credential may select. Fintable rejects `workspace_id` on this route.
+   * An official dashboard ID is absent here when the token has no grant for it.
+   */
+  async listWorkspaces(): Promise<FintableWorkspace[]> {
+    const payload = await this.request<unknown>('GET', '/workspaces', {}, undefined, {
+      includeWorkspace: false,
+    });
+    const rows =
+      payload &&
+      typeof payload === 'object' &&
+      'data' in payload &&
+      Array.isArray((payload as { data: unknown }).data)
+        ? (payload as { data: unknown[] }).data
+        : [];
+    return rows.flatMap((row) => {
+      if (!row || typeof row !== 'object') return [];
+      const rec = row as Record<string, unknown>;
+      if (typeof rec.id !== 'string' || !rec.id) return [];
+      return [
+        {
+          id: rec.id,
+          name: typeof rec.name === 'string' && rec.name ? rec.name : rec.id,
+          role: typeof rec.role === 'string' ? rec.role : '',
+          is_default: rec.is_default === true,
+        },
+      ];
+    });
+  }
+
   private async request<T>(
     method: string,
     path: string,
     query: Query = {},
     body?: unknown,
+    opts?: { includeWorkspace?: boolean },
   ): Promise<T> {
     if (this.dryRun || !this.token) {
       throw new FintableHttpError(503, 'Fintable dry-run mode: live HTTP disabled');
     }
 
     const url = new URL(`${this.baseUrl}${path.startsWith('/') ? path : `/${path}`}`);
-    url.searchParams.set('workspace_id', this.workspaceId);
+    if (opts?.includeWorkspace !== false) {
+      url.searchParams.set('workspace_id', this.workspaceId);
+    }
     for (const [key, value] of Object.entries(query)) {
       if (value === undefined || value === null) continue;
       if (Array.isArray(value)) {

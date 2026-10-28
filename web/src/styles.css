@@ -488,6 +488,15 @@ th {
   gap: 0.35rem;
 }
 
+tr.is-editing td {
+  background: var(--accent-soft);
+}
+
+.field-hint {
+  margin: 0.15rem 0 0;
+  font-size: 0.8rem;
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;
