@@ -24,6 +24,23 @@ const WEBHOOK_TIMEOUT_MS = 10_000;
 const BACKOFF_BASE_MS = 30_000;
 const BACKOFF_MAX_MS = 30 * 60_000;
 
+/**
+ * Webhook payloads carry banking data: only HTTPS endpoints are allowed.
+ * Plain http is accepted solely for localhost outside production (local receivers / tests).
+ */
+export function assertSecureWebhookUrl(rawUrl: string, nodeEnv: string): URL {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw badRequest('Invalid webhook URL');
+  }
+  if (url.protocol === 'https:') return url;
+  const isLocal = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  if (url.protocol === 'http:' && isLocal && nodeEnv !== 'production') return url;
+  throw badRequest('Webhook URL must use https://');
+}
+
 function serializeSubscription(
   row: typeof webhookSubscriptions.$inferSelect,
   opts?: { includeSecretOnce?: string },
@@ -95,12 +112,7 @@ export async function createWebhookSubscription(
 ) {
   const tenant = await db.query.tenants.findFirst({ where: eq(tenants.id, input.tenant_id) });
   if (!tenant) throw notFound('Tenant not found');
-  try {
-    // eslint-disable-next-line no-new
-    new URL(input.url);
-  } catch {
-    throw badRequest('Invalid webhook URL');
-  }
+  assertSecureWebhookUrl(input.url, getConfig().NODE_ENV);
   const events = input.events.filter((e) =>
     (WEBHOOK_EVENTS as readonly string[]).includes(e),
   );
@@ -245,6 +257,8 @@ async function deliverOnce(
   let status: 'succeeded' | 'failed' = 'failed';
 
   try {
+    // Re-check at send time: rows created before the https rule may still hold http:// URLs
+    assertSecureWebhookUrl(sub.url, config.NODE_ENV);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS);
     const res = await fetch(sub.url, {
@@ -260,6 +274,8 @@ async function deliverOnce(
       },
       body,
       signal: controller.signal,
+      // A redirect could downgrade to http or point elsewhere: treat it as a failure
+      redirect: 'error',
     });
     clearTimeout(timer);
     httpStatus = res.status;

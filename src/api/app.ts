@@ -8,6 +8,7 @@ import path from 'node:path';
 import type { Db } from '../db/client.js';
 import type { AppConfig } from '../lib/config.js';
 import { errorHandler } from './error-handler.js';
+import { getClientIp } from '../lib/client-ip.js';
 import { createAuthMiddleware } from './auth-middleware.js';
 import { healthRoutes } from './routes/health.js';
 import { tenantRoutes } from './routes/tenants.js';
@@ -40,7 +41,8 @@ function looksLikeStaticAsset(urlPath: string): boolean {
 
 export async function buildApp(opts: BuildAppOptions) {
   const app = Fastify({
-    trustProxy: true,
+    // Never trust client-supplied X-Forwarded-For; client IP comes from getClientIp()
+    trustProxy: false,
     logger: opts.logger ?? {
       level: opts.config.LOG_LEVEL,
     },
@@ -90,7 +92,8 @@ export async function buildApp(opts: BuildAppOptions) {
     max: opts.config.API_RATE_LIMIT_MAX,
     timeWindow: opts.config.API_RATE_LIMIT_TIME_WINDOW_MS,
     keyGenerator: (request) => {
-      const auth = request.headers.authorization ?? request.ip;
+      const auth =
+        request.headers.authorization ?? getClientIp(request, opts.config.CLIENT_IP_HEADER);
       return String(auth);
     },
   });

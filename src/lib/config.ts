@@ -17,6 +17,16 @@ const envSchema = z.object({
   WEBHOOK_DELIVERY_CRON: z.string().default('* * * * *'),
   PORT: z.coerce.number().int().positive().default(3000),
   HOST: z.string().default('0.0.0.0'),
+  /**
+   * Header carrying the real client IP, set by the platform edge (DO App Platform:
+   * `do-connecting-ip`). Empty = use the TCP peer address. X-Forwarded-For is never trusted.
+   */
+  CLIENT_IP_HEADER: z.string().optional().default(''),
+  /**
+   * PEM CA certificate of the managed Postgres cluster (DO: bind `${spendo-db.CA_CERT}`).
+   * When set, the DB TLS certificate chain is verified against it.
+   */
+  DATABASE_CA_CERT: z.string().optional().default(''),
   LOG_LEVEL: z.string().default('info'),
   API_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
   API_RATE_LIMIT_TIME_WINDOW_MS: z.coerce.number().int().positive().default(60_000),

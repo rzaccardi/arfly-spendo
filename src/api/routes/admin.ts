@@ -21,6 +21,7 @@ import {
   throwInvalidCredentials,
 } from '../../auth/login-guard.js';
 import { unauthorized } from '../../lib/errors.js';
+import { getClientIp } from '../../lib/client-ip.js';
 import { ALL_PERMISSIONS } from '../../auth/permissions.js';
 import {
   adminBrowseTransactions,
@@ -111,7 +112,7 @@ export async function adminRoutes(
         })
         .parse(request.body ?? {});
 
-      const ip = request.ip;
+      const ip = getClientIp(request, config.CLIENT_IP_HEADER);
       assertAdminLoginAllowed(config, ip);
 
       const issueSession = async (meta?: Record<string, unknown>) => {

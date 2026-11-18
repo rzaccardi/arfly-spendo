@@ -59,6 +59,14 @@ services:
       - key: FINTABLE_DRY_RUN
         scope: RUN_TIME
         value: "false"
+      # Real client IP from the DO edge (login lockout / rate limit); X-Forwarded-For is spoofable
+      - key: CLIENT_IP_HEADER
+        scope: RUN_TIME
+        value: "do-connecting-ip"
+      # Verify the Postgres TLS certificate against the cluster CA
+      - key: DATABASE_CA_CERT
+        scope: RUN_TIME
+        value: ${spendo-db.CA_CERT}
       # Bound managed Postgres (component name below)
       - key: DATABASE_URL
         scope: RUN_TIME
